@@ -11,6 +11,17 @@
     rollback_playbook_hint: "playbooks/02_simple_teardown.yml"
 
   pre_tasks:
+    - name: Validate required launch variable
+      ansible.builtin.assert:
+        that:
+          - simple_setup_tag is defined
+          - simple_setup_tag | string | length > 0
+        fail_msg: >-
+          Missing required launch variable simple_setup_tag.
+          Pass it via extra_vars, for example:
+          -e simple_setup_tag='my-run-tag'
+        success_msg: "Required launch variable simple_setup_tag is present."
+
     - name: Set integration run metadata
       ansible.builtin.set_fact:
         integration_run_id: >-
@@ -18,6 +29,14 @@
             lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
           }}-{{ inventory_hostname }}-simple-setup
         integration_failed: false
+
+    - name: Notify webhook that launch variable was received
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "launch_variable_received"
+        webhook_description: >-
+          simple_setup_tag was provided with value '{{ simple_setup_tag }}'.
 
     - name: Notify webhook that simple setup started
       ansible.builtin.include_tasks: ../tasks/webhook_event.yml
@@ -64,6 +83,7 @@
             content: |
               integration_run_id={{ integration_run_id }}
               playbook={{ integration_playbook_name }}
+              launch_tag={{ simple_setup_tag }}
               purpose=simple-setup-validation
 
         - name: Create simple heartbeat cron

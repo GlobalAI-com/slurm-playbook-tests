@@ -38,12 +38,7 @@
   delegate_to: localhost
   become: false
   register: webhook_call_result
-  failed_when: >-
-    {{
-      (webhook_fail_on_error | bool)
-      and
-      (
-        webhook_call_result.status | default(0) | int
-        not in (webhook_expected_statuses | default(webhook_default_expected_statuses))
-      )
-    }}
+  failed_when:
+    - webhook_fail_on_error | bool
+    - webhook_call_result.status | default(0) | int not in
+      (webhook_expected_statuses | default(webhook_default_expected_statuses))
