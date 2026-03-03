@@ -1,0 +1,67 @@
+---
+- name: Integration test - messy teardown
+  hosts: integration_test_vm
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../vars/webhook.yml
+  vars:
+    integration_suite_name: "managed-slurm-integration"
+    integration_playbook_name: "04_messy_teardown.yml"
+    rollback_playbook_hint: "playbooks/04_messy_teardown.yml"
+
+  pre_tasks:
+    - name: Set integration run metadata
+      ansible.builtin.set_fact:
+        integration_run_id: >-
+          {{
+            lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
+          }}-{{ inventory_hostname }}-messy-teardown
+        integration_failed: false
+
+    - name: Notify webhook that messy teardown started
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "start"
+        webhook_description: "Messy teardown playbook started."
+
+  tasks:
+    - name: Execute messy teardown rollback tasks
+      block:
+        - name: Remove all messy setup artifacts
+          ansible.builtin.include_tasks: ../tasks/rollback_messy.yml
+
+        - name: Notify checkpoint after messy teardown cleanup
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "running"
+            webhook_checkpoint: "cleanup_complete"
+            webhook_description: "Messy teardown cleanup actions completed."
+
+      rescue:
+        - name: Mark messy teardown as failed
+          ansible.builtin.set_fact:
+            integration_failed: true
+
+        - name: Notify webhook that messy teardown failed
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "failed"
+            webhook_checkpoint: "failed"
+            webhook_error_code: 1004
+            webhook_description: "Messy teardown failed before finishing cleanup."
+
+      always:
+        - name: Notify webhook final status for messy teardown
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "{{ 'failed' if integration_failed else 'success' }}"
+            webhook_checkpoint: "end"
+            webhook_error_code: "{{ 1004 if integration_failed else 0 }}"
+            webhook_description: >-
+              {{
+                'Messy teardown encountered failures.'
+                if integration_failed
+                else 'Messy teardown completed successfully.'
+              }}

@@ -1,0 +1,158 @@
+---
+- name: Prepare Ubuntu VM for Docker + dev-ready container deploy
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Add any existing users here to run docker without sudo.
+    # If create_users=true, missing users will be created.
+    docker_users:
+      - deploy
+    create_users: true
+
+    # Docker log rotation defaults (json-file driver)
+    docker_log_max_size: "10m"
+    docker_log_max_file: "3"
+
+    # Run a quick smoke test (pulls hello-world once)
+    docker_verify: true
+
+    # Packages that often conflict with Docker’s official packages
+    docker_conflicting_packages:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+
+  handlers:
+    - name: restart docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+
+  tasks:
+    - name: Ensure this is Ubuntu
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == "Ubuntu"
+        fail_msg: "This playbook currently supports Ubuntu only."
+
+    - name: Remove potentially conflicting distro packages (safe if absent)
+      ansible.builtin.apt:
+        name: "{{ docker_conflicting_packages }}"
+        state: absent
+        purge: true
+        autoremove: true
+      register: remove_conflicts
+      failed_when: false
+
+    - name: Install prerequisites for Docker repo
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+        update_cache: true
+
+    - name: Ensure /etc/apt/keyrings exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Docker official GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repo via docker.sources
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/ubuntu
+          Suites: {{ ansible_facts.distribution_release }}
+          Components: stable
+          Signed-By: /etc/apt/keyrings/docker.asc
+
+    - name: Install Docker Engine + Compose plugin
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Enable and start Docker
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Ensure docker group exists
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Create docker users (optional)
+      ansible.builtin.user:
+        name: "{{ item }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+      loop: "{{ docker_users }}"
+      when: create_users | bool
+
+    - name: Add users to docker group (no sudo needed after re-login)
+      ansible.builtin.user:
+        name: "{{ item }}"
+        groups: docker
+        append: true
+      loop: "{{ docker_users }}"
+
+    - name: Ensure /etc/docker exists
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: "0755"
+
+    - name: Configure Docker daemon log rotation
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "{{ docker_log_max_size }}",
+              "max-file": "{{ docker_log_max_file }}"
+            }
+          }
+      notify: restart docker
+
+    - name: Verify Docker works (hello-world)
+      ansible.builtin.command: docker run --rm hello-world
+      register: hello
+      changed_when: false
+      when: docker_verify | bool
+
+    - name: Verify docker compose plugin works
+      ansible.builtin.command: docker compose version
+      register: compose_ver
+      changed_when: false
+
+    - name: Print post-run note
+      ansible.builtin.debug:
+        msg: >
+          Docker is installed. Users added to the docker group must log out/in (or reboot)
+          for group membership to take effect. To expose a REST container to the LAN, publish
+          ports (e.g., -p 8080:8080) and ensure the app listens on 0.0.0.0.

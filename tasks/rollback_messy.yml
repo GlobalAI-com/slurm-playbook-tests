@@ -1,0 +1,64 @@
+---
+- name: Remove managed block from /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} MANAGED-SLURM-MESSY-TEST"
+    state: absent
+
+- name: Remove sudoers file for messy admins
+  ansible.builtin.file:
+    path: /etc/sudoers.d/managed-slurm-messy-admins
+    state: absent
+
+- name: Remove messy cron entries
+  ansible.builtin.cron:
+    name: "{{ item }}"
+    user: root
+    state: absent
+  loop:
+    - "managed-slurm-messy-hourly"
+    - "managed-slurm-messy-daily"
+
+- name: Remove messy symlink
+  ansible.builtin.file:
+    path: /srv/ms-messy/current
+    state: absent
+
+- name: Remove messy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /srv/ms-messy
+    - /etc/ms-messy
+    - /var/lib/ms-messy
+    - /var/log/ms-messy
+
+- name: Remove messy test users
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: true
+  loop:
+    - ms_messy_app
+    - ms_messy_ops
+    - ms_messy_audit
+
+- name: Remove messy test groups
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - ms-messy-admins
+    - ms-messy-auditors
+
+- name: Remove messy packages
+  ansible.builtin.apt:
+    name:
+      - nmap
+      - iftop
+      - htop
+    state: absent
+    purge: true
+    autoremove: true
+    update_cache: true

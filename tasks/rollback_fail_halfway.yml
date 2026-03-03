@@ -1,0 +1,33 @@
+---
+- name: Remove fail-halfway cron entry
+  ansible.builtin.cron:
+    name: "managed-slurm-fail-halfway"
+    user: root
+    state: absent
+
+- name: Remove fail-halfway users
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: true
+  loop:
+    - ms_fail_user_a
+    - ms_fail_user_b
+
+- name: Remove fail-halfway marker file
+  ansible.builtin.file:
+    path: /opt/managed-slurm-test/fail-halfway/seed.txt
+    state: absent
+
+- name: Remove fail-halfway directory
+  ansible.builtin.file:
+    path: /opt/managed-slurm-test/fail-halfway
+    state: absent
+
+- name: Remove fail-halfway package
+  ansible.builtin.apt:
+    name: rsync
+    state: absent
+    purge: true
+    autoremove: true
+    update_cache: true

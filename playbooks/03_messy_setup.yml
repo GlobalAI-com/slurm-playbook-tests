@@ -1,0 +1,167 @@
+---
+- name: Integration test - messy setup
+  hosts: integration_test_vm
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../vars/webhook.yml
+  vars:
+    integration_suite_name: "managed-slurm-integration"
+    integration_playbook_name: "03_messy_setup.yml"
+    rollback_playbook_hint: "playbooks/04_messy_teardown.yml"
+
+  pre_tasks:
+    - name: Set integration run metadata
+      ansible.builtin.set_fact:
+        integration_run_id: >-
+          {{
+            lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
+          }}-{{ inventory_hostname }}-messy-setup
+        integration_failed: false
+
+    - name: Notify webhook that messy setup started
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "start"
+        webhook_description: "Messy setup playbook started."
+
+  tasks:
+    - name: Apply messy setup changes
+      block:
+        - name: Install messy setup packages
+          ansible.builtin.apt:
+            name:
+              - nmap
+              - iftop
+              - htop
+            state: present
+            update_cache: true
+
+        - name: Create messy test groups
+          ansible.builtin.group:
+            name: "{{ item }}"
+            state: present
+          loop:
+            - ms-messy-admins
+            - ms-messy-auditors
+
+        - name: Create messy test users
+          ansible.builtin.user:
+            name: "{{ item.name }}"
+            groups: "{{ item.groups }}"
+            append: true
+            shell: /bin/bash
+            create_home: true
+            state: present
+          loop:
+            - name: ms_messy_app
+              groups: "ms-messy-admins"
+            - name: ms_messy_ops
+              groups: "ms-messy-admins"
+            - name: ms_messy_audit
+              groups: "ms-messy-auditors"
+
+        - name: Create messy directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop:
+            - /srv/ms-messy
+            - /srv/ms-messy/releases
+            - /srv/ms-messy/releases/2026.03.02
+            - /etc/ms-messy
+            - /var/lib/ms-messy
+            - /var/log/ms-messy
+
+        - name: Create messy release marker
+          ansible.builtin.copy:
+            dest: /srv/ms-messy/releases/2026.03.02/release.txt
+            mode: "0644"
+            content: |
+              integration_run_id={{ integration_run_id }}
+              stage=messy_setup
+
+        - name: Create messy symlink
+          ansible.builtin.file:
+            src: /srv/ms-messy/releases/2026.03.02
+            dest: /srv/ms-messy/current
+            state: link
+
+        - name: Add messy test sudoers entry
+          ansible.builtin.copy:
+            dest: /etc/sudoers.d/managed-slurm-messy-admins
+            mode: "0440"
+            content: |
+              %ms-messy-admins ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /usr/bin/journalctl
+
+        - name: Add managed block to /etc/hosts for messy setup
+          ansible.builtin.blockinfile:
+            path: /etc/hosts
+            marker: "# {mark} MANAGED-SLURM-MESSY-TEST"
+            block: |
+              10.250.0.10 messy-webhook.internal
+              10.250.0.11 messy-logs.internal
+
+        - name: Add messy cron entries
+          ansible.builtin.cron:
+            name: "{{ item.name }}"
+            minute: "{{ item.minute }}"
+            hour: "{{ item.hour | default('*') }}"
+            user: root
+            job: "{{ item.job }}"
+            state: present
+          loop:
+            - name: "managed-slurm-messy-hourly"
+              minute: "10"
+              job: "echo hourly >> /var/log/ms-messy/ops.log"
+            - name: "managed-slurm-messy-daily"
+              minute: "45"
+              hour: "2"
+              job: "echo daily >> /var/log/ms-messy/ops.log"
+
+        - name: Notify checkpoint after messy resources created
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "running"
+            webhook_checkpoint: "resources_created"
+            webhook_description: "Messy setup completed all provisioning steps."
+
+      rescue:
+        - name: Mark messy setup as failed
+          ansible.builtin.set_fact:
+            integration_failed: true
+
+        - name: Notify webhook that messy setup failed
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "failed"
+            webhook_checkpoint: "failed"
+            webhook_error_code: 1003
+            webhook_description: "Messy setup failed; rollback is starting."
+
+        - name: Roll back partial messy setup
+          ansible.builtin.include_tasks: ../tasks/rollback_messy.yml
+
+        - name: Notify webhook rollback finished after messy setup failure
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "rolled_back"
+            webhook_checkpoint: "rollback_complete"
+            webhook_error_code: 1003
+            webhook_description: "Messy setup rollback completed after failure."
+
+      always:
+        - name: Notify webhook final status for messy setup
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "{{ 'failed' if integration_failed else 'success' }}"
+            webhook_checkpoint: "end"
+            webhook_error_code: "{{ 1003 if integration_failed else 0 }}"
+            webhook_description: >-
+              {{
+                'Messy setup completed with failure and rollback.'
+                if integration_failed
+                else 'Messy setup completed successfully.'
+              }}

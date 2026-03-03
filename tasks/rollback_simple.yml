@@ -1,0 +1,32 @@
+---
+- name: Remove simple test cron entry
+  ansible.builtin.cron:
+    name: "managed-slurm-simple-heartbeat"
+    user: root
+    state: absent
+
+- name: Remove simple marker file
+  ansible.builtin.file:
+    path: /opt/managed-slurm-test/simple/marker.txt
+    state: absent
+
+- name: Remove simple test directory
+  ansible.builtin.file:
+    path: /opt/managed-slurm-test/simple
+    state: absent
+
+- name: Remove simple test user
+  ansible.builtin.user:
+    name: ms_simple_user
+    state: absent
+    remove: true
+
+- name: Remove simple validation packages
+  ansible.builtin.apt:
+    name:
+      - tree
+      - jq
+    state: absent
+    purge: true
+    autoremove: true
+    update_cache: true

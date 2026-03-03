@@ -1,0 +1,49 @@
+---
+- name: Build webhook URL and headers
+  ansible.builtin.set_fact:
+    webhook_url: "{{ webhook_scheme }}://{{ webhook_host }}:{{ webhook_port }}{{ webhook_endpoint }}"
+    webhook_headers: >-
+      {{
+        {'Content-Type': 'application/json'}
+        | combine(
+            (webhook_token | default('') | length > 0)
+            | ternary({'Authorization': 'Bearer ' ~ webhook_token}, {})
+          )
+      }}
+
+- name: Send webhook checkpoint event
+  ansible.builtin.uri:
+    url: "{{ webhook_url }}"
+    method: POST
+    headers: "{{ webhook_headers }}"
+    body_format: json
+    body:
+      status: "{{ webhook_status }}"
+      description: "{{ webhook_description }}"
+      error_code: "{{ webhook_error_code | default(0) }}"
+      checkpoint: "{{ webhook_checkpoint | default('unspecified') }}"
+      suite: "{{ integration_suite_name | default('managed-slurm-integration') }}"
+      run_id: "{{ integration_run_id }}"
+      host: "{{ inventory_hostname }}"
+      playbook: "{{ integration_playbook_name }}"
+      remediation:
+        job_template_id: "{{ remediation_job_template_id | default('') }}"
+        job_template_name: "{{ remediation_job_template_name | default('') }}"
+        rollback_playbook: "{{ rollback_playbook_hint | default('') }}"
+      timestamp_utc: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+    return_content: true
+    status_code: "{{ webhook_expected_statuses | default(webhook_default_expected_statuses) }}"
+    timeout: "{{ webhook_timeout }}"
+    validate_certs: "{{ webhook_validate_certs }}"
+  delegate_to: localhost
+  become: false
+  register: webhook_call_result
+  failed_when: >-
+    {{
+      (webhook_fail_on_error | bool)
+      and
+      (
+        webhook_call_result.status | default(0) | int
+        not in (webhook_expected_statuses | default(webhook_default_expected_statuses))
+      )
+    }}

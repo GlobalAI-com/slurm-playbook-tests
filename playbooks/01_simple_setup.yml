@@ -1,0 +1,120 @@
+---
+- name: Integration test - simple setup
+  hosts: integration_test_vm
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../vars/webhook.yml
+  vars:
+    integration_suite_name: "managed-slurm-integration"
+    integration_playbook_name: "01_simple_setup.yml"
+    rollback_playbook_hint: "playbooks/02_simple_teardown.yml"
+
+  pre_tasks:
+    - name: Set integration run metadata
+      ansible.builtin.set_fact:
+        integration_run_id: >-
+          {{
+            lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
+          }}-{{ inventory_hostname }}-simple-setup
+        integration_failed: false
+
+    - name: Notify webhook that simple setup started
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "start"
+        webhook_description: "Simple setup playbook started."
+
+  tasks:
+    - name: Apply simple setup changes
+      block:
+        - name: Install simple validation packages
+          ansible.builtin.apt:
+            name:
+              - tree
+              - jq
+            state: present
+            update_cache: true
+
+        - name: Notify checkpoint after package install
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "running"
+            webhook_checkpoint: "packages_installed"
+            webhook_description: "Simple setup installed test packages."
+
+        - name: Create simple test user
+          ansible.builtin.user:
+            name: ms_simple_user
+            shell: /bin/bash
+            create_home: true
+            state: present
+
+        - name: Create simple test directory
+          ansible.builtin.file:
+            path: /opt/managed-slurm-test/simple
+            state: directory
+            mode: "0755"
+
+        - name: Create simple marker file
+          ansible.builtin.copy:
+            dest: /opt/managed-slurm-test/simple/marker.txt
+            mode: "0644"
+            content: |
+              integration_run_id={{ integration_run_id }}
+              playbook={{ integration_playbook_name }}
+              purpose=simple-setup-validation
+
+        - name: Create simple heartbeat cron
+          ansible.builtin.cron:
+            name: "managed-slurm-simple-heartbeat"
+            minute: "*/30"
+            user: root
+            job: "echo simple-heartbeat >> /var/log/managed-slurm-simple.log"
+            state: present
+
+        - name: Notify checkpoint after resources created
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "running"
+            webhook_checkpoint: "resources_created"
+            webhook_description: "Simple setup resources created."
+
+      rescue:
+        - name: Mark simple setup as failed
+          ansible.builtin.set_fact:
+            integration_failed: true
+
+        - name: Notify webhook that simple setup failed
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "failed"
+            webhook_checkpoint: "failed"
+            webhook_error_code: 1001
+            webhook_description: "Simple setup failed; rollback is starting."
+
+        - name: Roll back partial simple setup
+          ansible.builtin.include_tasks: ../tasks/rollback_simple.yml
+
+        - name: Notify webhook rollback finished after simple setup failure
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "rolled_back"
+            webhook_checkpoint: "rollback_complete"
+            webhook_error_code: 1001
+            webhook_description: "Simple setup rollback completed after failure."
+
+      always:
+        - name: Notify webhook final status for simple setup
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "{{ 'failed' if integration_failed else 'success' }}"
+            webhook_checkpoint: "end"
+            webhook_error_code: "{{ 1001 if integration_failed else 0 }}"
+            webhook_description: >-
+              {{
+                'Simple setup completed with failure and rollback.'
+                if integration_failed
+                else 'Simple setup completed successfully.'
+              }}

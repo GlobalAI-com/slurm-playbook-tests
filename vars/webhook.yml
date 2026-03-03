@@ -1,0 +1,19 @@
+---
+# Override these values with -e, env-specific vars files, or AWX survey vars.
+webhook_scheme: "http"
+webhook_host: "127.0.0.1"
+webhook_port: 8000
+webhook_endpoint: "/awx/logging"
+webhook_validate_certs: false
+webhook_timeout: 10
+webhook_token: ""
+webhook_default_expected_statuses:
+  - 200
+  - 201
+  - 202
+  - 204
+webhook_fail_on_error: false
+
+# Optional metadata to help downstream remediation automation.
+remediation_job_template_id: ""
+remediation_job_template_name: ""

@@ -1,0 +1,127 @@
+---
+- name: Integration test - intentional failure setup
+  hosts: integration_test_vm
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../vars/webhook.yml
+  vars:
+    integration_suite_name: "managed-slurm-integration"
+    integration_playbook_name: "05_intentional_failure_setup.yml"
+    rollback_playbook_hint: "playbooks/06_intentional_failure_teardown.yml"
+
+  pre_tasks:
+    - name: Set integration run metadata
+      ansible.builtin.set_fact:
+        integration_run_id: >-
+          {{
+            lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
+          }}-{{ inventory_hostname }}-intentional-failure
+        integration_failed: false
+
+    - name: Notify webhook that intentional failure setup started
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "start"
+        webhook_description: "Intentional failure setup playbook started."
+
+  tasks:
+    - name: Apply setup that intentionally fails midway
+      block:
+        - name: Install a package as pre-failure setup
+          ansible.builtin.apt:
+            name: rsync
+            state: present
+            update_cache: true
+
+        - name: Create fail-halfway test directory
+          ansible.builtin.file:
+            path: /opt/managed-slurm-test/fail-halfway
+            state: directory
+            mode: "0755"
+
+        - name: Create fail-halfway marker file
+          ansible.builtin.copy:
+            dest: /opt/managed-slurm-test/fail-halfway/seed.txt
+            mode: "0644"
+            content: |
+              integration_run_id={{ integration_run_id }}
+              stage=pre-failure
+
+        - name: Create fail-halfway test users
+          ansible.builtin.user:
+            name: "{{ item }}"
+            shell: /bin/bash
+            create_home: true
+            state: present
+          loop:
+            - ms_fail_user_a
+            - ms_fail_user_b
+
+        - name: Create fail-halfway cron entry
+          ansible.builtin.cron:
+            name: "managed-slurm-fail-halfway"
+            minute: "15"
+            user: root
+            job: "echo fail-halfway >> /var/log/managed-slurm-fail-halfway.log"
+            state: present
+
+        - name: Notify checkpoint immediately before injected failure
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "running"
+            webhook_checkpoint: "pre_injected_failure"
+            webhook_description: "Intentional failure setup reached failure injection checkpoint."
+
+        # Point of failure:
+        # Keep this task enabled to verify rollback behavior when a run fails midway.
+        - name: Inject intentional failure halfway through setup
+          ansible.builtin.fail:
+            msg: "Intentional failure for rollback validation in 05_intentional_failure_setup.yml"
+
+        # Point after failure:
+        # Any tasks below this point should NOT run while intentional failure is enabled.
+        - name: This task is expected to be skipped due to failure
+          ansible.builtin.copy:
+            dest: /opt/managed-slurm-test/fail-halfway/should-not-exist.txt
+            mode: "0644"
+            content: "If this file exists, the intentional failure did not trigger."
+
+      rescue:
+        - name: Mark intentional failure setup as failed
+          ansible.builtin.set_fact:
+            integration_failed: true
+
+        - name: Notify webhook that intentional failure setup failed
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "failed"
+            webhook_checkpoint: "failed"
+            webhook_error_code: 1005
+            webhook_description: "Intentional failure triggered; rollback is starting."
+
+        - name: Roll back partial fail-halfway setup
+          ansible.builtin.include_tasks: ../tasks/rollback_fail_halfway.yml
+
+        - name: Notify webhook rollback finished after intentional failure
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "rolled_back"
+            webhook_checkpoint: "rollback_complete"
+            webhook_error_code: 1005
+            webhook_description: "Fail-halfway rollback completed after intentional failure."
+
+      always:
+        - name: Notify webhook final status for intentional failure setup
+          ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+          vars:
+            webhook_status: "{{ 'failed' if integration_failed else 'success' }}"
+            webhook_checkpoint: "end"
+            webhook_error_code: "{{ 1005 if integration_failed else 0 }}"
+            webhook_description: >-
+              {{
+                'Intentional failure setup ended in failure (expected) with rollback.'
+                if integration_failed
+                else 'Intentional failure setup completed successfully (failure injection disabled).'
+              }}
