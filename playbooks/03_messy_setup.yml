@@ -11,6 +11,19 @@
     rollback_playbook_hint: "playbooks/04_messy_teardown.yml"
 
   pre_tasks:
+    - name: Validate required launch variables for messy setup
+      ansible.builtin.assert:
+        that:
+          - messy_setup_tag is defined
+          - messy_setup_tag | string | length > 0
+          - messy_change_ticket is defined
+          - messy_change_ticket | string | length > 0
+        fail_msg: >-
+          Missing required launch variables for messy setup.
+          Pass both via extra_vars, for example:
+          -e messy_setup_tag='messy-run-a' -e messy_change_ticket='CHG-12345'
+        success_msg: "Required launch variables for messy setup are present."
+
     - name: Set integration run metadata
       ansible.builtin.set_fact:
         integration_run_id: >-
@@ -18,6 +31,14 @@
             lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
           }}-{{ inventory_hostname }}-messy-setup
         integration_failed: false
+
+    - name: Notify webhook that messy launch variables were received
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "launch_variables_received"
+        webhook_description: >-
+          messy_setup_tag='{{ messy_setup_tag }}', messy_change_ticket='{{ messy_change_ticket }}'.
 
     - name: Notify webhook that messy setup started
       ansible.builtin.include_tasks: ../tasks/webhook_event.yml
@@ -81,6 +102,8 @@
             mode: "0644"
             content: |
               integration_run_id={{ integration_run_id }}
+              messy_setup_tag={{ messy_setup_tag }}
+              messy_change_ticket={{ messy_change_ticket }}
               stage=messy_setup
 
         - name: Create messy symlink

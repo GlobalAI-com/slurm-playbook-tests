@@ -11,6 +11,21 @@
     rollback_playbook_hint: "playbooks/06_intentional_failure_teardown.yml"
 
   pre_tasks:
+    - name: Validate required launch variables for intentional failure setup
+      ansible.builtin.assert:
+        that:
+          - failure_test_tag is defined
+          - failure_test_tag | string | length > 0
+          - failure_error_code is defined
+          - failure_error_code | string | length > 0
+          - failure_change_ticket is defined
+          - failure_change_ticket | string | length > 0
+        fail_msg: >-
+          Missing required launch variables for intentional failure setup.
+          Pass all via extra_vars, for example:
+          -e failure_test_tag='fail-validate-a' -e failure_error_code='1005' -e failure_change_ticket='CHG-98765'
+        success_msg: "Required launch variables for intentional failure setup are present."
+
     - name: Set integration run metadata
       ansible.builtin.set_fact:
         integration_run_id: >-
@@ -18,6 +33,14 @@
             lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')
           }}-{{ inventory_hostname }}-intentional-failure
         integration_failed: false
+
+    - name: Notify webhook that intentional failure launch variables were received
+      ansible.builtin.include_tasks: ../tasks/webhook_event.yml
+      vars:
+        webhook_status: "running"
+        webhook_checkpoint: "launch_variables_received"
+        webhook_description: >-
+          failure_test_tag='{{ failure_test_tag }}', failure_error_code='{{ failure_error_code }}', failure_change_ticket='{{ failure_change_ticket }}'.
 
     - name: Notify webhook that intentional failure setup started
       ansible.builtin.include_tasks: ../tasks/webhook_event.yml
@@ -47,6 +70,9 @@
             mode: "0644"
             content: |
               integration_run_id={{ integration_run_id }}
+              failure_test_tag={{ failure_test_tag }}
+              failure_error_code={{ failure_error_code }}
+              failure_change_ticket={{ failure_change_ticket }}
               stage=pre-failure
 
         - name: Create fail-halfway test users
