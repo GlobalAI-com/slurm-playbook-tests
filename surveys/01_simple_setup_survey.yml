@@ -1,0 +1,11 @@
+name: "01 Simple Setup Survey"
+description: "Collect required launch variables for the simple setup playbook."
+spec:
+  - question_name: "Simple Setup Tag"
+    question_description: "Required value passed to the playbook as simple_setup_tag."
+    required: true
+    type: text
+    variable: simple_setup_tag
+    min: 1
+    max: 128
+    default: ""
