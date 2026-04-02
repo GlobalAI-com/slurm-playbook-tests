@@ -1,2 +1,12 @@
 plugin: netbox.netbox.nb_inventory
 validate_certs: false
+
+group_by:
+  - tags
+  - site
+  - location
+  - device_roles
+  - platform
+  - status
+
+fetch_all: false
