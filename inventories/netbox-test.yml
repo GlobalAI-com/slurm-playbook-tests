@@ -1,5 +1,2 @@
 plugin: netbox.netbox.nb_inventory
 validate_certs: false
-
-device_query_filters:
-  - has_primary_ip: 'true'
