@@ -1,9 +1,5 @@
 plugin: netbox.netbox.nb_inventory
-validate_certs: true
-config_context: false
+validate_certs: false
+
 device_query_filters:
   - has_primary_ip: 'true'
-  - tag: awx-test
-group_by:
-  - site
-  - device_roles
