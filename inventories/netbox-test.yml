@@ -1,6 +1,10 @@
 plugin: netbox.netbox.nb_inventory
 validate_certs: false
 plurals: true
+device_query_filters:
+  - has_primary_ip: 'true'
+vm_query_filters:
+  - has_primary_ip: 'true'
 group_by:
   - sites
   - device_roles
