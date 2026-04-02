@@ -1,9 +1,10 @@
 plugin: netbox.netbox.nb_inventory
 validate_certs: false
+plurals: true
 group_by:
-  - tags
-  - site
-  - location
+  - sites
   - device_roles
-  - platform
+  - tags
   - status
+  - racks
+  - manufacturers
