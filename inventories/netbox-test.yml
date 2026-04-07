@@ -1,4 +1,6 @@
 plugin: netbox.netbox.nb_inventory
+compose:
+  netbox_id: id
 validate_certs: false
 plurals: true
 device_query_filters:
